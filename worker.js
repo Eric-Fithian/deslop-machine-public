@@ -3,7 +3,7 @@ import {
   AutoTokenizer,
   TextStreamer,
   env,
-} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+} from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
 
 const PROMPT = "### Draft:\n{ai}\n\n### Revised:\n";
 const STOPS = ["### Draft:", "\n\n###"];
@@ -14,9 +14,13 @@ env.allowLocalModels = true;
 env.allowRemoteModels = false;
 env.useBrowserCache = true;
 env.localModelPath = root;
+env.backends.onnx.wasm.simd = true;
+env.backends.onnx.wasm.numThreads = self.navigator?.hardwareConcurrency || 4;
 
 let tokenizer = null;
 let model = null;
+let backend = "wasm";
+let dtype = "q4";
 
 self.onunhandledrejection = (event) => {
   post({ type: "error", text: String(event.reason?.message || event.reason) });
@@ -37,15 +41,16 @@ self.onmessage = async (event) => {
 
 async function load() {
   post({ type: "progress", text: "Loading the 135M model…" });
-  const device = await pickDevice();
-  tokenizer = await AutoTokenizer.from_pretrained("model");
-  model = await AutoModelForCausalLM.from_pretrained("model", {
-    device,
-    dtype: "q4",
+  backend = await pickDevice();
+  dtype = backend === "webgpu" ? "q4f16" : "q4";
+  tokenizer = await AutoTokenizer.from_pretrained("v2");
+  model = await AutoModelForCausalLM.from_pretrained("v2", {
+    device: backend,
+    dtype,
     progress_callback: onProgress,
   });
-  const label = device === "webgpu" ? "GPU" : "CPU";
-  post({ type: "ready", text: `Ready. SmolLM2-135M on ${label}.` });
+  const label = backend === "webgpu" ? "GPU" : "CPU";
+  post({ type: "ready", text: `Ready. SmolLM2-135M on ${label} (${dtype}).` });
 }
 
 async function generate(text) {
@@ -56,9 +61,12 @@ async function generate(text) {
   const inputs = tokenizer(prompt);
   let full = "";
   let emitted = 0;
+  let tokens = 0;
+  const started = performance.now();
   const streamer = new TextStreamer(tokenizer, {
     skip_prompt: true,
     callback_function: (piece) => {
+      tokens += 1;
       full += piece;
       const visible = firstStop(full);
       if (visible.length > emitted) {
@@ -73,7 +81,8 @@ async function generate(text) {
     do_sample: false,
     streamer,
   });
-  post({ type: "done" });
+  const seconds = (performance.now() - started) / 1000;
+  post({ type: "done", tokens, seconds });
 }
 
 function firstStop(text) {

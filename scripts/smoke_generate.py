@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = ROOT / "model"
+MODEL = ROOT / "v2"
 PROMPT = "### Draft:\nRecent advances in machine learning have led to significant improvements.\n\n### Revised:\n"
 
 

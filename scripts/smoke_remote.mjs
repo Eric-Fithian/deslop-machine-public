@@ -1,10 +1,9 @@
 import { AutoModelForCausalLM, AutoTokenizer, env } from "@huggingface/transformers";
-import { fileURLToPath } from "node:url";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
-env.allowLocalModels = true;
-env.allowRemoteModels = false;
-env.localModelPath = root;
+env.allowLocalModels = false;
+env.allowRemoteModels = true;
+env.remoteHost = "https://eric-fithian.github.io/deslop-machine-public/";
+env.remotePathTemplate = "{model}/";
 
 const PROMPT = "### Draft:\nRecent advances in machine learning have led to significant improvements.\n\n### Revised:\n";
 
@@ -17,7 +16,7 @@ async function main() {
   const revised = text.split("### Revised:\n")[1] ?? "";
   console.log(revised);
   if (!revised.trim()) {
-    throw new Error("model produced an empty revision");
+    throw new Error("hosted model produced an empty revision");
   }
 }
 

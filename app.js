@@ -31,7 +31,8 @@ worker.onmessage = (event) => {
   if (msg.type === "done") {
     revised.classList.remove("generating");
     run.disabled = false;
-    status.textContent = "Ready.";
+    const tps = msg.seconds > 0 ? (msg.tokens / msg.seconds) : 0;
+    status.textContent = `${tps.toFixed(1)} tok/s`;
     return;
   }
   if (msg.type === "error") {

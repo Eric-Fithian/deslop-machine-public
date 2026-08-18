@@ -22,8 +22,8 @@ jobs:
       - name: pack
         run: |
           mkdir _site
-          cp index.html style.css app.js worker.js .nojekyll _site/
-          cp -R model _site/model
+          cp index.html style.css app.js worker.js coi-serviceworker.js .nojekyll _site/
+          cp -R v2 _site/v2
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
