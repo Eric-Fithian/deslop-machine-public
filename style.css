@@ -1,0 +1,126 @@
+:root {
+  --ink: #111111;
+  --mute: #666666;
+  --line: #d6d4cf;
+  --paper: #f7f6f2;
+  --field: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.45 system-ui, sans-serif;
+}
+
+body {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header { margin-bottom: 20px; }
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+header p, footer p {
+  margin: 6px 0 0;
+  color: var(--mute);
+  font-size: 14px;
+}
+
+#hint { margin-left: auto; }
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  min-height: 420px;
+}
+
+section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-bottom: 6px;
+}
+
+textarea, #revised {
+  flex: 1;
+  width: 100%;
+  min-height: 360px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--field);
+  color: var(--ink);
+  font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: none;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+textarea:focus {
+  outline: 1px solid var(--ink);
+  border-color: var(--ink);
+}
+
+#revised.empty { color: #a3a29d; }
+
+footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+button {
+  appearance: none;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font: 14px/1 system-ui, sans-serif;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #c4c2bb;
+  border-color: #c4c2bb;
+  cursor: default;
+}
+
+button:not(:disabled):hover { opacity: 0.88; }
+
+#revised.generating::after {
+  content: "▍";
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+@media (max-width: 720px) {
+  main { grid-template-columns: 1fr; }
+  textarea, #revised { min-height: 220px; }
+}

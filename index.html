@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>deslop</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>deslop</h1>
+    <p>Rewrite AI prose so it reads like a paper. Runs in your browser.</p>
+  </header>
+  <main>
+    <section>
+      <label for="draft">Draft</label>
+      <textarea id="draft" spellcheck="false" placeholder="Paste an AI paragraph."></textarea>
+    </section>
+    <section>
+      <label>Revised</label>
+      <div id="revised" aria-live="polite"></div>
+    </section>
+  </main>
+  <footer>
+    <button id="run" type="button" disabled>Rewrite</button>
+    <p id="hint">⌘↩ or Ctrl↩</p>
+    <p id="status">Loading the 135M model…</p>
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
