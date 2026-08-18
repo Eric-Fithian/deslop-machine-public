@@ -9,8 +9,8 @@ env.localModelPath = root;
 const PROMPT = "### Draft:\nRecent advances in machine learning have led to significant improvements.\n\n### Revised:\n";
 
 async function main() {
-  const tokenizer = await AutoTokenizer.from_pretrained("v3");
-  const model = await AutoModelForCausalLM.from_pretrained("v3", { dtype: "q4" });
+  const tokenizer = await AutoTokenizer.from_pretrained("v4");
+  const model = await AutoModelForCausalLM.from_pretrained("v4", { dtype: "q4" });
   const inputs = tokenizer(PROMPT);
   const ids = await model.generate({ ...inputs, max_new_tokens: 24, do_sample: false });
   const text = tokenizer.decode(ids[0], { skip_special_tokens: true });

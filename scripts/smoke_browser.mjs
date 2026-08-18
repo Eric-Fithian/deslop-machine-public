@@ -4,7 +4,10 @@ const URL = "https://eric-fithian.github.io/deslop-machine-public/";
 const DRAFT = "Recent advances in machine learning have led to significant improvements.";
 
 async function main() {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    channel: "chrome",
+    args: ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features"],
+  });
   const page = await browser.newPage();
   page.setDefaultTimeout(180000);
   page.setDefaultNavigationTimeout(180000);
@@ -26,11 +29,13 @@ async function main() {
   await page.fill("#draft", DRAFT);
   await page.click("#run");
   await page.waitForFunction(() => {
-    const text = document.getElementById("revised").textContent;
-    return text && text.length > 20;
+    const text = document.getElementById("status").textContent;
+    return text && text.includes("tok/s");
   }, { timeout: 120000 });
   const revised = await page.textContent("#revised");
+  const status = await page.textContent("#status");
   console.log(ready);
+  console.log(status);
   console.log(revised);
   await browser.close();
   if (!revised.trim()) {

@@ -5,9 +5,12 @@ node_modules/
 package.json
 package-lock.json
 _adapter_v5b_smollm2_135m/
+_adapter_v5b_0.6b/
 _merged/
 _export/
 _genai_cpu/
 _genai_webgpu/
+v4/onnx/model_q4.onnx
+v4/onnx/model_q4.onnx_data
 *.log
 .DS_Store

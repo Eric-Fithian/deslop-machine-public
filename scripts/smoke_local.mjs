@@ -19,11 +19,8 @@ const TYPES = {
 async function main() {
   const server = await serve();
   const url = `http://127.0.0.1:${server.address().port}/`;
-  const engine = process.argv[2] || "chromium";
-  const browserType = engine === "firefox" ? firefox : chromium;
-  const browser = await browserType.launch({
-    args: ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features"],
-  });
+  const engine = process.argv[2] || "chrome";
+  const browser = await launch(engine);
   const page = await browser.newPage();
   page.setDefaultTimeout(180000);
   page.on("console", (msg) => {
@@ -93,6 +90,21 @@ async function main() {
   }
   await browser.close();
   server.close();
+}
+
+function launch(engine) {
+  if (engine === "firefox") {
+    return firefox.launch();
+  }
+  if (engine === "chrome") {
+    return chromium.launch({
+      channel: "chrome",
+      args: ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features"],
+    });
+  }
+  return chromium.launch({
+    args: ["--enable-unsafe-webgpu", "--enable-webgpu-developer-features"],
+  });
 }
 
 function serve() {

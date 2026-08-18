@@ -21,9 +21,11 @@ jobs:
           lfs: true
       - name: pack
         run: |
-          mkdir _site
+          mkdir -p _site/v4/onnx
           cp index.html style.css app.js worker.js coi-serviceworker.js .nojekyll _site/
-          cp -R v3 _site/v3
+          cp v4/config.json v4/generation_config.json v4/tokenizer.json \
+            v4/tokenizer_config.json v4/special_tokens_map.json _site/v4/
+          cp v4/onnx/model_q4f16.onnx v4/onnx/model_q4f16.onnx_data _site/v4/onnx/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

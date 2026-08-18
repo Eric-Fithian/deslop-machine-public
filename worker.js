@@ -20,8 +20,6 @@ env.backends.onnx.wasm.numThreads = self.navigator?.hardwareConcurrency || 4;
 
 let tokenizer = null;
 let model = null;
-let backend = "wasm";
-let dtype = "q4";
 let job = null;
 
 self.onunhandledrejection = (event) => {
@@ -54,17 +52,15 @@ self.onmessage = async (event) => {
 };
 
 async function load() {
-  post({ type: "progress", text: "Loading the 135M model…" });
-  backend = await pickDevice();
-  dtype = backend === "webgpu" ? "q4f16" : "q4";
-  tokenizer = await AutoTokenizer.from_pretrained("v3");
-  model = await AutoModelForCausalLM.from_pretrained("v3", {
-    device: backend,
-    dtype,
+  post({ type: "progress", text: "Loading the 0.6B model…" });
+  await requireWebGpuF16();
+  tokenizer = await AutoTokenizer.from_pretrained("v4");
+  model = await AutoModelForCausalLM.from_pretrained("v4", {
+    device: "webgpu",
+    dtype: "q4f16",
     progress_callback: onProgress,
   });
-  const label = backend === "webgpu" ? "GPU" : "CPU";
-  post({ type: "ready", text: `Ready. SmolLM2-135M on ${label} (${dtype}).` });
+  post({ type: "ready", text: "Ready. Qwen3-0.6B on GPU (q4f16)." });
 }
 
 async function startGenerate(text, temperature) {
@@ -194,15 +190,14 @@ function firstStop(text) {
   return text.slice(0, end);
 }
 
-async function pickDevice() {
+async function requireWebGpuF16() {
   if (!self.navigator?.gpu) {
-    return "wasm";
+    throw new Error("This demo needs WebGPU. Use Chrome or Firefox on a recent GPU.");
   }
   const adapter = await self.navigator.gpu.requestAdapter();
-  if (adapter?.features.has("shader-f16")) {
-    return "webgpu";
+  if (!adapter?.features.has("shader-f16")) {
+    throw new Error("This demo needs WebGPU shader-f16. Chrome or Firefox on an M-series Mac works.");
   }
-  return "wasm";
 }
 
 function onProgress(info) {
