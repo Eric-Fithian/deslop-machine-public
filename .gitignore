@@ -7,5 +7,7 @@ package-lock.json
 _adapter_v5b_smollm2_135m/
 _merged/
 _export/
+_genai_cpu/
+_genai_webgpu/
 *.log
 .DS_Store

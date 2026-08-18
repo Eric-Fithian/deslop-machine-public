@@ -30,6 +30,7 @@
   "vocab_size": 49152,
   "transformers.js_config": {
     "dtype": "q4",
+    "use_external_data_format": 1,
     "kv_cache_dtype": {
       "q4f16": "float16",
       "fp16": "float16"

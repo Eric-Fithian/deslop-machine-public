@@ -43,8 +43,8 @@ async function load() {
   post({ type: "progress", text: "Loading the 135M model…" });
   backend = await pickDevice();
   dtype = backend === "webgpu" ? "q4f16" : "q4";
-  tokenizer = await AutoTokenizer.from_pretrained("v2");
-  model = await AutoModelForCausalLM.from_pretrained("v2", {
+  tokenizer = await AutoTokenizer.from_pretrained("v3");
+  model = await AutoModelForCausalLM.from_pretrained("v3", {
     device: backend,
     dtype,
     progress_callback: onProgress,
@@ -97,7 +97,11 @@ function firstStop(text) {
 }
 
 async function pickDevice() {
-  if (self.navigator?.gpu && await self.navigator.gpu.requestAdapter()) {
+  if (!self.navigator?.gpu) {
+    return "wasm";
+  }
+  const adapter = await self.navigator.gpu.requestAdapter();
+  if (adapter?.features.has("shader-f16")) {
     return "webgpu";
   }
   return "wasm";

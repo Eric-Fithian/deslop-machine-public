@@ -1,4 +1,5 @@
-"""Merge the 135M LoRA and export ONNX files for transformers.js."""
+"""Merge the 135M LoRA and export fused ONNX files for transformers.js."""
+import json
 import shutil
 import subprocess
 import sys
@@ -9,8 +10,9 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = ROOT / "_adapter_v5b_smollm2_135m"
 MERGED = ROOT / "_merged"
-EXPORT = ROOT / "_export"
-MODEL = ROOT / "v2"
+GENAI_CPU = ROOT / "_genai_cpu"
+GENAI_WEBGPU = ROOT / "_genai_webgpu"
+MODEL = ROOT / "v3"
 BASE = "HuggingFaceTB/SmolLM2-135M"
 EXTRAS = [
     "config.json",
@@ -55,137 +57,125 @@ def merge():
 
 
 def export():
-    if (EXPORT / "config.json").is_file() and any(EXPORT.glob("*.onnx")):
-        print(f"reusing {EXPORT}", file=sys.stderr)
+    # Keep embeddings as Gather. The builder otherwise emits
+    # GatherBlockQuantized, which onnxruntime-web does not implement.
+    common = ["nodes_to_exclude=/model/embed_tokens/Gather"]
+    build_genai(GENAI_CPU, "cpu", ["--extra_options", *common])
+    build_genai(GENAI_WEBGPU, "webgpu", [
+        "--extra_options", *common, "enable_webgpu_graph=true",
+    ])
+
+
+def build_genai(dest, provider, extra):
+    if (dest / "model.onnx").is_file():
+        print(f"reusing {dest}", file=sys.stderr)
         return
-    if EXPORT.exists():
-        shutil.rmtree(EXPORT)
-    print("exporting ONNX", file=sys.stderr)
-    cli = Path(sys.executable).parent / "optimum-cli"
-    if not cli.is_file():
-        raise SystemExit(f"optimum-cli missing: {cli}")
+    if dest.exists():
+        shutil.rmtree(dest)
+    print(f"building {dest.name} ({provider} int4)", file=sys.stderr)
     subprocess.run(
         [
-            str(cli), "export", "onnx",
-            "--model", str(MERGED),
-            "--task", "text-generation-with-past",
-            str(EXPORT),
+            sys.executable, "-m", "onnxruntime_genai.models.builder",
+            "-i", str(MERGED),
+            "-o", str(dest),
+            "-p", "int4",
+            "-e", provider,
+            *extra,
         ],
         check=True,
     )
+    if not (dest / "model.onnx").is_file():
+        raise SystemExit(f"genai builder produced no model.onnx in {dest}")
 
 
 def assemble():
-    from onnxruntime.quantization.matmul_nbits_quantizer import MatMulNBitsQuantizer
-    from onnxruntime.transformers.fusion_options import AttentionOpType, FusionOptions
-    from onnxruntime.transformers.optimizer import optimize_model
-
-    onnx_src = pick_onnx(EXPORT)
-    fused = EXPORT / "model_fused.onnx"
-    print(f"fusing {onnx_src.name}", file=sys.stderr)
-    options = FusionOptions("qwen3")
-    options.set_attention_op_type(AttentionOpType.GroupQueryAttention)
-    optimized = optimize_model(
-        str(onnx_src),
-        model_type="qwen3",
-        num_heads=9,
-        hidden_size=576,
-        optimization_options=options,
-    )
-    optimized.save_model_to_file(str(fused))
-    count_ops(fused)
+    fused_cpu = count_ops(GENAI_CPU / "model.onnx")
+    fused_gpu = count_ops(GENAI_WEBGPU / "model.onnx")
+    if fused_cpu < 30:
+        raise SystemExit(f"cpu graph has {fused_cpu} fused attention ops")
+    if fused_gpu < 30:
+        raise SystemExit(f"webgpu graph has {fused_gpu} fused attention ops")
     if MODEL.exists():
         shutil.rmtree(MODEL)
     MODEL.mkdir(parents=True)
     onnx_dir = MODEL / "onnx"
     onnx_dir.mkdir()
     for name in tqdm(EXTRAS, desc="copy tokenizer"):
-        src = EXPORT / name
-        if src.is_file():
-            shutil.copy2(src, MODEL / name)
-        else:
-            fallback = MERGED / name
-            if fallback.is_file():
-                shutil.copy2(fallback, MODEL / name)
-    q4 = onnx_dir / "model_q4.onnx"
-    print(f"quantizing {fused.name} -> {q4.name}", file=sys.stderr)
-    quant = MatMulNBitsQuantizer(str(fused), bits=4, block_size=32, is_symmetric=True)
-    quant.process()
-    quant.model.save_model_to_file(str(q4))
-    q4f16 = onnx_dir / "model_q4f16.onnx"
-    print(f"quantizing {fused.name} -> {q4f16.name}", file=sys.stderr)
-    fp16 = EXPORT / "model_fused_fp16.onnx"
-    to_fp16(fused, fp16)
-    quant16 = MatMulNBitsQuantizer(str(fp16), bits=4, block_size=32, is_symmetric=True)
-    quant16.process()
-    quant16.model.save_model_to_file(str(q4f16))
+        src = MERGED / name
+        if not src.is_file():
+            raise SystemExit(f"missing {src}")
+        shutil.copy2(src, MODEL / name)
+    save_external(GENAI_CPU / "model.onnx", onnx_dir / "model_q4.onnx")
+    save_external(GENAI_WEBGPU / "model.onnx", onnx_dir / "model_q4f16.onnx")
+    patch_js_config(MODEL / "config.json")
     print(f"-> {MODEL}", file=sys.stderr)
     for path in sorted(MODEL.rglob("*")):
         if path.is_file():
             print(f"  {path.relative_to(MODEL)} {path.stat().st_size}",
                   file=sys.stderr)
-    config_path = MODEL / "config.json"
-    if not config_path.is_file():
-        raise SystemExit("model/config.json missing after assemble")
-    if not q4.is_file():
-        raise SystemExit(f"{q4} missing after assemble")
-    if not q4f16.is_file():
-        raise SystemExit(f"{q4f16} missing after assemble")
-    patch_js_config(config_path)
 
 
-def to_fp16(src, dest):
+def pin_kv_cache_dim(model, dim):
+    # transformers.js allocates empty past as [B, kv_heads, 0, last_dim];
+    # a symbolic last dim becomes 0 and GroupQueryAttention rejects it.
+    for value in list(model.graph.input) + list(model.graph.output) + list(model.graph.value_info):
+        for axis in value.type.tensor_type.shape.dim:
+            if axis.dim_param == "kv_cache_dim":
+                axis.ClearField("dim_param")
+                axis.dim_value = dim
+
+
+def save_external(src, dest):
     import onnx
-    from onnxruntime.transformers.float16 import convert_float_to_float16
+    from onnx.external_data_helper import convert_model_to_external_data
 
-    converted = convert_float_to_float16(str(src), keep_io_types=False)
-    onnx.save(converted, str(dest))
+    print(f"writing {dest.name}", file=sys.stderr)
+    model = onnx.load(str(src), load_external_data=True)
+    pin_kv_cache_dim(model, 64)
+    convert_model_to_external_data(
+        model,
+        all_tensors_to_one_file=True,
+        location=f"{dest.name}_data",
+        size_threshold=1024,
+    )
+    onnx.save(model, str(dest))
+    data = dest.parent / f"{dest.name}_data"
+    if not dest.is_file():
+        raise SystemExit(f"{dest} missing after save")
+    if not data.is_file():
+        raise SystemExit(f"{data} missing after save")
 
 
 def count_ops(path):
     import onnx
 
-    model = onnx.load(str(path), load_external_data=True)
+    model = onnx.load(str(path), load_external_data=False)
     ops = {}
     for node in model.graph.node:
         ops[node.op_type] = ops.get(node.op_type, 0) + 1
-    print("fused ops:", file=sys.stderr)
-    for name, n in sorted(ops.items(), key=lambda kv: -kv[1])[:20]:
+    print(f"fused ops ({path.parent.name}):", file=sys.stderr)
+    for name, n in sorted(ops.items(), key=lambda kv: -kv[1])[:12]:
         print(f"  {name} {n}", file=sys.stderr)
     fused = sum(ops.get(name, 0) for name in (
         "GroupQueryAttention", "MultiHeadAttention", "Attention"))
     print(f"  attention fused: {fused}", file=sys.stderr)
+    return fused
 
 
 def patch_js_config(path):
-    import json
-
     cfg = json.loads(path.read_text())
     cfg["transformers.js_config"] = {
         "dtype": "q4",
+        "use_external_data_format": 1,
         "kv_cache_dtype": {"q4f16": "float16", "fp16": "float16"},
     }
     path.write_text(json.dumps(cfg, indent=2) + "\n")
 
 
-def pick_onnx(folder):
-    candidates = [
-        folder / "model.onnx",
-        folder / "decoder_model_merged.onnx",
-        folder / "decoder_model.onnx",
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path
-    found = sorted(folder.glob("*.onnx"))
-    if not found:
-        raise SystemExit(f"no ONNX files in {folder}: {list(folder.iterdir())}")
-    return found[0]
-
-
 def check():
     assert ADAPTER.name == "_adapter_v5b_smollm2_135m"
     assert BASE == "HuggingFaceTB/SmolLM2-135M"
+    assert MODEL.name == "v3"
     print("check ok")
 
 
