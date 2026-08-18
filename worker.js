@@ -1,6 +1,7 @@
 import {
   AutoModelForCausalLM,
   AutoTokenizer,
+  InterruptableStoppingCriteria,
   TextStreamer,
   env,
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
@@ -21,6 +22,7 @@ let tokenizer = null;
 let model = null;
 let backend = "wasm";
 let dtype = "q4";
+let job = null;
 
 self.onunhandledrejection = (event) => {
   post({ type: "error", text: String(event.reason?.message || event.reason) });
@@ -33,7 +35,19 @@ self.onmessage = async (event) => {
     return;
   }
   if (msg.type === "generate") {
-    await generate(msg.text, msg.temperature);
+    await startGenerate(msg.text, msg.temperature);
+    return;
+  }
+  if (msg.type === "pause") {
+    pause();
+    return;
+  }
+  if (msg.type === "resume") {
+    await resume(msg.temperature);
+    return;
+  }
+  if (msg.type === "clear") {
+    clearJob();
     return;
   }
   throw new Error(`unknown worker message ${msg.type}`);
@@ -53,38 +67,113 @@ async function load() {
   post({ type: "ready", text: `Ready. SmolLM2-135M on ${label} (${dtype}).` });
 }
 
-async function generate(text, temperature) {
+async function startGenerate(text, temperature) {
   if (!tokenizer || !model) {
     throw new Error("model is not loaded");
   }
-  const temp = readTemperature(temperature);
-  const prompt = PROMPT.replace("{ai}", text);
-  const inputs = tokenizer(prompt);
-  let full = "";
-  let emitted = 0;
-  let tokens = 0;
-  const started = performance.now();
+  if (job?.interrupt) {
+    job.interrupt.interrupt();
+  }
+  job = {
+    prompt: PROMPT.replace("{ai}", text),
+    full: "",
+    emitted: 0,
+    tokens: 0,
+    remaining: MAX_NEW_TOKENS,
+    temperature: readTemperature(temperature),
+    started: performance.now(),
+    interrupt: null,
+  };
+  await runGenerate();
+}
+
+function pause() {
+  if (!job?.interrupt) {
+    return;
+  }
+  job.interrupt.interrupt();
+}
+
+async function resume(temperature) {
+  if (!job) {
+    throw new Error("nothing to resume");
+  }
+  if (job.interrupt) {
+    throw new Error("generation is already running");
+  }
+  job.temperature = readTemperature(temperature);
+  job.tokens = 0;
+  job.started = performance.now();
+  await runGenerate();
+}
+
+function clearJob() {
+  if (job?.interrupt) {
+    job.interrupt.interrupt();
+  }
+  job = null;
+  post({ type: "cleared" });
+}
+
+async function runGenerate() {
+  const current = job;
+  if (!current) {
+    throw new Error("no generation job");
+  }
+  if (current.remaining < 1) {
+    finish(current, false);
+    return;
+  }
+  current.interrupt = new InterruptableStoppingCriteria();
+  const inputs = tokenizer(current.prompt + current.full);
   const streamer = new TextStreamer(tokenizer, {
     skip_prompt: true,
     callback_function: (piece) => {
-      tokens += 1;
-      full += piece;
-      const visible = firstStop(full);
-      if (visible.length > emitted) {
-        post({ type: "token", text: visible.slice(emitted) });
-        emitted = visible.length;
+      if (current !== job) {
+        return;
+      }
+      current.tokens += 1;
+      current.full += piece;
+      const visible = firstStop(current.full);
+      if (visible.length < current.full.length) {
+        current.full = visible;
+        current.interrupt.interrupt();
+      }
+      if (visible.length > current.emitted) {
+        post({ type: "token", text: visible.slice(current.emitted) });
+        current.emitted = visible.length;
       }
     },
   });
-  await model.generate({
+  const generated = await model.generate({
     ...inputs,
-    max_new_tokens: MAX_NEW_TOKENS,
-    do_sample: temp > 0,
-    temperature: temp > 0 ? temp : 1,
+    max_new_tokens: current.remaining,
+    do_sample: current.temperature > 0,
+    temperature: current.temperature > 0 ? current.temperature : 1,
     streamer,
+    stopping_criteria: current.interrupt,
   });
-  const seconds = (performance.now() - started) / 1000;
-  post({ type: "done", tokens, seconds });
+  if (current !== job) {
+    return;
+  }
+  const used = generated.dims.at(-1) - inputs.input_ids.dims.at(-1);
+  if (used < 0) {
+    throw new Error(`generate shrank the sequence by ${-used} tokens`);
+  }
+  current.remaining -= used;
+  const interrupted = current.interrupt.interrupted;
+  current.interrupt = null;
+  finish(current, interrupted && current.remaining > 0);
+}
+
+function finish(current, paused) {
+  const seconds = (performance.now() - current.started) / 1000;
+  if (paused) {
+    post({ type: "paused", tokens: current.tokens, seconds });
+    return;
+  }
+  job = null;
+  post({ type: "done", tokens: current.tokens, seconds });
 }
 
 function readTemperature(value) {

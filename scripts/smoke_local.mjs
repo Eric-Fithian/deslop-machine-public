@@ -52,6 +52,29 @@ async function main() {
   }
   await page.click("#run");
   await page.waitForFunction(() => {
+    const text = document.getElementById("revised").textContent;
+    return text && !text.includes("Paste an AI paragraph") && text.length > 5;
+  });
+  if (await page.locator("#pause").isEnabled()) {
+    await page.click("#pause");
+    await page.waitForFunction(() => {
+      const pause = document.getElementById("pause").textContent;
+      const line = document.getElementById("status").textContent;
+      return pause === "Resume" || line.includes("tok/s");
+    });
+    if (await page.textContent("#pause") === "Resume") {
+      const pausedText = await page.textContent("#revised");
+      await page.click("#pause");
+      await page.waitForFunction(() => {
+        return document.getElementById("status").textContent.includes("tok/s");
+      });
+      const resumed = await page.textContent("#revised");
+      if (!resumed.startsWith(pausedText)) {
+        throw new Error("resume lost the paused text");
+      }
+    }
+  }
+  await page.waitForFunction(() => {
     const text = document.getElementById("status").textContent;
     return text && text.includes("tok/s");
   }, { timeout: 180000 });
@@ -60,11 +83,16 @@ async function main() {
   console.log(ready);
   console.log(status);
   console.log(revised);
-  await browser.close();
-  server.close();
   if (!revised.trim() || revised.includes("Paste an AI paragraph")) {
     throw new Error("page produced an empty revision");
   }
+  await page.click("#clear");
+  const cleared = await page.textContent("#revised");
+  if (cleared.trim() !== "Paste an AI paragraph.") {
+    throw new Error(`clear left ${JSON.stringify(cleared)}`);
+  }
+  await browser.close();
+  server.close();
 }
 
 function serve() {

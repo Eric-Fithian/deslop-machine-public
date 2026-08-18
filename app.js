@@ -1,13 +1,17 @@
 const draft = document.getElementById("draft");
 const revised = document.getElementById("revised");
 const run = document.getElementById("run");
+const pauseBtn = document.getElementById("pause");
+const clearBtn = document.getElementById("clear");
 const status = document.getElementById("status");
 const temp = document.getElementById("temp");
 const tempVal = document.getElementById("temp-val");
 
 const PLACEHOLDER = "Paste an AI paragraph.";
-revised.textContent = PLACEHOLDER;
-revised.classList.add("empty");
+let acceptTokens = false;
+let paused = false;
+
+showPlaceholder();
 
 const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
 
@@ -19,10 +23,13 @@ worker.onmessage = (event) => {
   }
   if (msg.type === "ready") {
     status.textContent = msg.text;
-    run.disabled = false;
+    setIdle();
     return;
   }
   if (msg.type === "token") {
+    if (!acceptTokens) {
+      return;
+    }
     if (revised.classList.contains("empty")) {
       revised.textContent = "";
       revised.classList.remove("empty");
@@ -30,23 +37,30 @@ worker.onmessage = (event) => {
     revised.textContent += msg.text;
     return;
   }
+  if (msg.type === "paused") {
+    setPaused();
+    status.textContent = "Paused";
+    return;
+  }
+  if (msg.type === "cleared") {
+    showPlaceholder();
+    setIdle();
+    return;
+  }
   if (msg.type === "done") {
-    revised.classList.remove("generating");
-    run.disabled = false;
+    setIdle();
     const tps = msg.seconds > 0 ? (msg.tokens / msg.seconds) : 0;
     status.textContent = `${tps.toFixed(1)} tok/s`;
     return;
   }
   if (msg.type === "error") {
-    revised.classList.remove("generating");
-    run.disabled = false;
+    setIdle();
     status.textContent = msg.text;
   }
 };
 
 worker.onerror = (event) => {
-  run.disabled = false;
-  revised.classList.remove("generating");
+  setIdle();
   status.textContent = event.message || "The model worker failed.";
 };
 
@@ -54,6 +68,8 @@ temp.addEventListener("input", () => {
   tempVal.textContent = Number(temp.value).toFixed(1);
 });
 run.addEventListener("click", rewrite);
+pauseBtn.addEventListener("click", togglePause);
+clearBtn.addEventListener("click", clearOutput);
 draft.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
@@ -68,10 +84,67 @@ function rewrite() {
   }
   revised.textContent = "";
   revised.classList.remove("empty");
-  revised.classList.add("generating");
-  run.disabled = true;
+  setGenerating();
   status.textContent = "Rewriting…";
   worker.postMessage({ type: "generate", text, temperature: readTemperature() });
+}
+
+function togglePause() {
+  if (pauseBtn.disabled) {
+    return;
+  }
+  if (paused) {
+    setGenerating();
+    status.textContent = "Rewriting…";
+    worker.postMessage({ type: "resume", temperature: readTemperature() });
+    return;
+  }
+  worker.postMessage({ type: "pause" });
+}
+
+function clearOutput() {
+  if (clearBtn.disabled) {
+    return;
+  }
+  acceptTokens = false;
+  worker.postMessage({ type: "clear" });
+  showPlaceholder();
+  setIdle();
+}
+
+function setIdle() {
+  acceptTokens = false;
+  paused = false;
+  run.disabled = false;
+  pauseBtn.disabled = true;
+  pauseBtn.textContent = "Pause";
+  clearBtn.disabled = revised.classList.contains("empty");
+  revised.classList.remove("generating");
+}
+
+function setGenerating() {
+  acceptTokens = true;
+  paused = false;
+  run.disabled = true;
+  pauseBtn.disabled = false;
+  pauseBtn.textContent = "Pause";
+  clearBtn.disabled = false;
+  revised.classList.add("generating");
+}
+
+function setPaused() {
+  paused = true;
+  run.disabled = false;
+  pauseBtn.disabled = false;
+  pauseBtn.textContent = "Resume";
+  clearBtn.disabled = revised.classList.contains("empty");
+  revised.classList.remove("generating");
+}
+
+function showPlaceholder() {
+  revised.textContent = PLACEHOLDER;
+  revised.classList.add("empty");
+  revised.classList.remove("generating");
 }
 
 function readTemperature() {
