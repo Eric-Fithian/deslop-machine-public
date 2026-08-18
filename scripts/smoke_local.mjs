@@ -42,6 +42,14 @@ async function main() {
     throw new Error(`expected Ready, got ${ready}`);
   }
   await page.fill("#draft", DRAFT);
+  await page.locator("#temp").evaluate((el) => {
+    el.value = "0.8";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const shown = await page.textContent("#temp-val");
+  if (shown !== "0.8") {
+    throw new Error(`expected temperature readout 0.8, got ${shown}`);
+  }
   await page.click("#run");
   await page.waitForFunction(() => {
     const text = document.getElementById("status").textContent;

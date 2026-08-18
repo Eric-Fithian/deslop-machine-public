@@ -33,7 +33,7 @@ self.onmessage = async (event) => {
     return;
   }
   if (msg.type === "generate") {
-    await generate(msg.text);
+    await generate(msg.text, msg.temperature);
     return;
   }
   throw new Error(`unknown worker message ${msg.type}`);
@@ -53,10 +53,11 @@ async function load() {
   post({ type: "ready", text: `Ready. SmolLM2-135M on ${label} (${dtype}).` });
 }
 
-async function generate(text) {
+async function generate(text, temperature) {
   if (!tokenizer || !model) {
     throw new Error("model is not loaded");
   }
+  const temp = readTemperature(temperature);
   const prompt = PROMPT.replace("{ai}", text);
   const inputs = tokenizer(prompt);
   let full = "";
@@ -78,11 +79,19 @@ async function generate(text) {
   await model.generate({
     ...inputs,
     max_new_tokens: MAX_NEW_TOKENS,
-    do_sample: false,
+    do_sample: temp > 0,
+    temperature: temp > 0 ? temp : 1,
     streamer,
   });
   const seconds = (performance.now() - started) / 1000;
   post({ type: "done", tokens, seconds });
+}
+
+function readTemperature(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`temperature must be a finite number >= 0, got ${value}`);
+  }
+  return value;
 }
 
 function firstStop(text) {

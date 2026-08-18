@@ -2,6 +2,8 @@ const draft = document.getElementById("draft");
 const revised = document.getElementById("revised");
 const run = document.getElementById("run");
 const status = document.getElementById("status");
+const temp = document.getElementById("temp");
+const tempVal = document.getElementById("temp-val");
 
 const PLACEHOLDER = "Paste an AI paragraph.";
 revised.textContent = PLACEHOLDER;
@@ -48,6 +50,9 @@ worker.onerror = (event) => {
   status.textContent = event.message || "The model worker failed.";
 };
 
+temp.addEventListener("input", () => {
+  tempVal.textContent = Number(temp.value).toFixed(1);
+});
 run.addEventListener("click", rewrite);
 draft.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -66,7 +71,15 @@ function rewrite() {
   revised.classList.add("generating");
   run.disabled = true;
   status.textContent = "Rewriting…";
-  worker.postMessage({ type: "generate", text });
+  worker.postMessage({ type: "generate", text, temperature: readTemperature() });
+}
+
+function readTemperature() {
+  const value = Number(temp.value);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`temperature must be a finite number >= 0, got ${temp.value}`);
+  }
+  return value;
 }
 
 worker.postMessage({ type: "load" });
