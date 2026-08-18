@@ -6,12 +6,18 @@ const DRAFT = "Recent advances in machine learning have led to significant impro
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
+  page.setDefaultTimeout(180000);
+  page.setDefaultNavigationTimeout(180000);
+  page.on("console", (msg) => {
+    console.error(`browser ${msg.type()}: ${msg.text()}`);
+  });
   page.on("pageerror", (err) => {
     throw err;
   });
   await page.goto(URL, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => !document.getElementById("run").disabled, {
-    timeout: 180000,
+  await page.waitForFunction(() => {
+    const el = document.getElementById("status");
+    return el && (el.textContent.includes("Ready") || el.textContent.includes("Error") || el.textContent.includes("failed"));
   });
   const ready = await page.textContent("#status");
   if (!ready.includes("Ready")) {
